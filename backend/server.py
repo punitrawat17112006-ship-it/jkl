@@ -1,5 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -12,8 +13,8 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import jwt
 from passlib.context import CryptContext
-from supabase import create_client, Client
-import base64
+import shutil
+import aiofiles
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -23,10 +24,9 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Supabase connection
-supabase_url = os.environ.get('SUPABASE_URL')
-supabase_key = os.environ.get('SUPABASE_KEY')
-supabase: Client = create_client(supabase_url, supabase_key)
+# Create uploads directory
+UPLOADS_DIR = ROOT_DIR / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
 
 # JWT Config
 JWT_SECRET = os.environ.get('JWT_SECRET', 'photoevent-secret')
@@ -134,12 +134,10 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 @api_router.post("/auth/register", response_model=TokenResponse)
 async def register(user_data: UserCreate):
-    # Check if user exists
     existing = await db.users.find_one({"email": user_data.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    # Create user
     user_id = str(uuid.uuid4())
     user = {
         "id": user_id,
@@ -150,7 +148,6 @@ async def register(user_data: UserCreate):
     }
     await db.users.insert_one(user)
     
-    # Generate token
     token = create_access_token(user_id, user_data.email)
     
     return TokenResponse(
@@ -197,7 +194,6 @@ async def create_event(event_data: EventCreate, current_user: dict = Depends(get
     event_id = str(uuid.uuid4())
     event_date = event_data.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
-    # Generate QR URL for customer page
     qr_url = f"/event/{event_id}"
     
     event = {
@@ -211,6 +207,10 @@ async def create_event(event_data: EventCreate, current_user: dict = Depends(get
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.events.insert_one(event)
+    
+    # Create event folder for uploads
+    event_folder = UPLOADS_DIR / event_id
+    event_folder.mkdir(exist_ok=True)
     
     return EventResponse(**event)
 
@@ -232,8 +232,12 @@ async def delete_event(event_id: str, current_user: dict = Depends(get_current_u
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Event not found")
     
-    # Delete associated photos from DB
     await db.photos.delete_many({"event_id": event_id})
+    
+    # Remove event folder
+    event_folder = UPLOADS_DIR / event_id
+    if event_folder.exists():
+        shutil.rmtree(event_folder)
     
     return {"message": "Event deleted successfully"}
 
@@ -250,28 +254,31 @@ async def upload_photos(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     
+    # Ensure event folder exists
+    event_folder = UPLOADS_DIR / event_id
+    event_folder.mkdir(exist_ok=True)
+    
     uploaded_photos = []
     
     for file in files:
-        if not file.content_type.startswith("image/"):
+        if not file.content_type or not file.content_type.startswith("image/"):
+            logger.warning(f"Skipping non-image file: {file.filename}")
             continue
         
         try:
-            # Read file content
-            content = await file.read()
+            # Generate unique filename
             photo_id = str(uuid.uuid4())
             file_ext = file.filename.split(".")[-1] if "." in file.filename else "jpg"
-            storage_path = f"{event_id}/{photo_id}.{file_ext}"
+            safe_filename = f"{photo_id}.{file_ext}"
+            file_path = event_folder / safe_filename
             
-            # Upload to Supabase Storage
-            result = supabase.storage.from_("event-photos").upload(
-                path=storage_path,
-                file=content,
-                file_options={"content-type": file.content_type}
-            )
+            # Save file to disk
+            content = await file.read()
+            async with aiofiles.open(file_path, 'wb') as f:
+                await f.write(content)
             
-            # Get public URL
-            public_url = supabase.storage.from_("event-photos").get_public_url(storage_path)
+            # Generate public URL
+            public_url = f"/api/uploads/{event_id}/{safe_filename}"
             
             # Save to MongoDB
             photo = {
@@ -279,11 +286,13 @@ async def upload_photos(
                 "event_id": event_id,
                 "url": public_url,
                 "filename": file.filename,
-                "storage_path": storage_path,
+                "storage_path": str(file_path),
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             await db.photos.insert_one(photo)
             uploaded_photos.append(PhotoResponse(**photo))
+            
+            logger.info(f"Successfully uploaded: {file.filename} -> {safe_filename}")
             
         except Exception as e:
             logger.error(f"Error uploading {file.filename}: {str(e)}")
@@ -295,6 +304,7 @@ async def upload_photos(
             {"id": event_id},
             {"$inc": {"photo_count": len(uploaded_photos)}}
         )
+        logger.info(f"Updated event {event_id} with {len(uploaded_photos)} new photos")
     
     return uploaded_photos
 
@@ -307,7 +317,7 @@ async def get_event_photos(event_id: str, current_user: dict = Depends(get_curre
     photos = await db.photos.find({"event_id": event_id}, {"_id": 0}).to_list(1000)
     return [PhotoResponse(**p) for p in photos]
 
-# ============ PUBLIC EVENT ROUTE (for customers) ============
+# ============ PUBLIC EVENT ROUTES ============
 
 @api_router.get("/public/events/{event_id}")
 async def get_public_event(event_id: str):
@@ -333,6 +343,9 @@ async def health_check():
 
 # Include the router in the main app
 app.include_router(api_router)
+
+# Serve uploaded files statically
+app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 app.add_middleware(
     CORSMiddleware,
