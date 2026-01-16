@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
 export default function EventDetailPage() {
   const { eventId } = useParams();
@@ -282,7 +283,7 @@ export default function EventDetailPage() {
                     data-testid={`photo-${photo.id}`}
                   >
                     <img
-                      src={photo.url}
+                      src={photo.url.startsWith('http') ? photo.url : `${BACKEND_URL}${photo.url}`}
                       alt={photo.filename}
                       className="w-full h-full object-cover"
                       loading="lazy"

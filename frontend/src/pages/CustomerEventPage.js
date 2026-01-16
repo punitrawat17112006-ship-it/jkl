@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import axios from "axios";
 
 const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
 export default function CustomerEventPage() {
   const { eventId } = useParams();
@@ -131,7 +132,7 @@ export default function CustomerEventPage() {
                   data-testid={`customer-photo-${photo.id}`}
                 >
                   <img
-                    src={photo.url}
+                    src={photo.url.startsWith('http') ? photo.url : `${BACKEND_URL}${photo.url}`}
                     alt={photo.filename}
                     className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
                     loading="lazy"
@@ -192,14 +193,14 @@ export default function CustomerEventPage() {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              src={selectedPhoto.url}
+              src={selectedPhoto.url.startsWith('http') ? selectedPhoto.url : `${BACKEND_URL}${selectedPhoto.url}`}
               alt={selectedPhoto.filename}
               className="max-w-full max-h-[85vh] object-contain rounded-lg"
               onClick={(e) => e.stopPropagation()}
             />
             
             <a
-              href={selectedPhoto.url}
+              href={selectedPhoto.url.startsWith('http') ? selectedPhoto.url : `${BACKEND_URL}${selectedPhoto.url}`}
               download
               target="_blank"
               rel="noopener noreferrer"
