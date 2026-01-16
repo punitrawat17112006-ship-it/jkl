@@ -1,0 +1,58 @@
+{
+  "timestamp": "2026-01-16T09:27:31.637088",
+  "total_tests": 10,
+  "passed_tests": 10,
+  "success_rate": 1.0,
+  "results": [
+    {
+      "test": "Health Check",
+      "success": true,
+      "details": "Status: 200, Response: {\n  \"status\": \"healthy\",\n  \"timestamp\": \"2026-01-16T09:27:30.878182+00:00\"\n}..."
+    },
+    {
+      "test": "User Registration",
+      "success": true,
+      "details": "Status: 200, Response: {\n  \"access_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIzZmU3YWYyNi0xZjQ3LTQzNjEtYWJhZS01N2U1Y2VhNmY0ZTIiLCJlbWFpbCI6InRlc3RfdXNlcl8wOTI3MzBAZXhhbXBsZS5jb20iLCJleHAiOjE3Njg2NDIwNTF9.1gNgM..."
+    },
+    {
+      "test": "Get User Profile",
+      "success": true,
+      "details": "Status: 200, Response: {\n  \"id\": \"3fe7af26-1f47-4361-abae-57e5cea6f4e2\",\n  \"email\": \"test_user_092730@example.com\",\n  \"name\": \"Test User 092730\",\n  \"created_at\": \"2026-01-16T09:27:31.168954+00:00\"\n}..."
+    },
+    {
+      "test": "Create Event",
+      "success": true,
+      "details": "Status: 200, Response: {\n  \"id\": \"8415993b-7da1-4d2a-83c3-ae077ae77886\",\n  \"name\": \"Test Event 092731\",\n  \"description\": \"Test event for API testing\",\n  \"date\": \"2024-12-25\",\n  \"user_id\": \"3fe7af26-1f47-4361-abae-57e5cea6f4..."
+    },
+    {
+      "test": "Get Events",
+      "success": true,
+      "details": "Status: 200, Response: [\n  {\n    \"id\": \"8415993b-7da1-4d2a-83c3-ae077ae77886\",\n    \"name\": \"Test Event 092731\",\n    \"description\": \"Test event for API testing\",\n    \"date\": \"2024-12-25\",\n    \"user_id\": \"3fe7af26-1f47-4361-a..."
+    },
+    {
+      "test": "Get Event Detail",
+      "success": true,
+      "details": "Status: 200, Response: {\n  \"id\": \"8415993b-7da1-4d2a-83c3-ae077ae77886\",\n  \"name\": \"Test Event 092731\",\n  \"description\": \"Test event for API testing\",\n  \"date\": \"2024-12-25\",\n  \"user_id\": \"3fe7af26-1f47-4361-abae-57e5cea6f4..."
+    },
+    {
+      "test": "Photo Upload",
+      "success": true,
+      "details": "Status: 200, Response: []..."
+    },
+    {
+      "test": "Get Event Photos",
+      "success": true,
+      "details": "Status: 200, Response: []..."
+    },
+    {
+      "test": "Public Event Access",
+      "success": true,
+      "details": "Status: 200, Response: {\n  \"id\": \"8415993b-7da1-4d2a-83c3-ae077ae77886\",\n  \"name\": \"Test Event 092731\",\n  \"description\": \"Test event for API testing\",\n  \"date\": \"2024-12-25\",\n  \"photo_count\": 0,\n  \"qr_url\": \"/event/8415993b..."
+    },
+    {
+      "test": "Public Event Photos",
+      "success": true,
+      "details": "Status: 200, Response: []..."
+    }
+  ]
+}
