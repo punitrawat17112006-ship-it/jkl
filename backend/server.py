@@ -415,8 +415,11 @@ async def find_my_photos(event_id: str, selfie: UploadFile = File(...)):
     photos = await db.photos.find({"event_id": event_id}, {"_id": 0}).to_list(1000)
     
     matched_photos = []
-    THRESHOLD = 65  # Balanced threshold at 0.65
-    all_scores = []  # Track all scores for logging
+    THRESHOLD = 60  # Hardcoded to 0.6 (60%)
+    all_scores = []
+    
+    # LOG: Show total photos being compared
+    logger.info(f"PROCESSING SELFIE: Comparing against {len(photos)} photos in event {event_id}")
     
     for photo in photos:
         photo_hash = photo.get("image_hash", "")
@@ -434,13 +437,13 @@ async def find_my_photos(event_id: str, selfie: UploadFile = File(...)):
                     created_at=photo["created_at"]
                 ))
     
-    # Log highest scores for debugging
+    # Log all scores for debugging
     if all_scores:
         all_scores.sort(key=lambda x: x["score"], reverse=True)
-        top_scores = all_scores[:5]
-        logger.info(f"TOP 5 SCORES for event {event_id}: {top_scores}")
-        if not matched_photos:
-            logger.warning(f"NO MATCHES >= {THRESHOLD}%. Highest was: {top_scores[0] if top_scores else 'none'}")
+        logger.info(f"TOP 5 SCORES: {all_scores[:5]}")
+        logger.info(f"MATCHES FOUND: {len(matched_photos)} photos >= {THRESHOLD}%")
+    else:
+        logger.warning(f"NO HASHES FOUND - photos may not have image_hash field")
     
     # Sort by similarity (highest first)
     matched_photos.sort(key=lambda x: x.similarity, reverse=True)
