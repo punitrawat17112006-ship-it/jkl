@@ -16,6 +16,9 @@ from passlib.context import CryptContext
 import shutil
 import aiofiles
 import httpx
+from PIL import Image
+import imagehash
+import io
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -44,11 +47,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Create the main app
 app = FastAPI(title="PhotoEvent Pro API")
-
-# Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
-
-# Security
 security = HTTPBearer()
 
 # Configure logging
@@ -63,61 +62,93 @@ class SupabaseStorage:
         self.key = key
         self.bucket = bucket
         self.storage_url = f"{self.url}/storage/v1"
-        self.headers = {
-            "apikey": key,
-            "Authorization": f"Bearer {key}"
-        }
+        self.headers = {"apikey": key, "Authorization": f"Bearer {key}"}
         self._connected = None
     
     async def check_connection(self) -> bool:
-        """Test if Supabase is reachable"""
         if self._connected is not None:
             return self._connected
-        
         try:
             async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.get(
-                    f"{self.storage_url}/bucket",
-                    headers=self.headers
-                )
+                response = await client.get(f"{self.storage_url}/bucket", headers=self.headers)
                 self._connected = response.status_code in [200, 401, 403]
-                if self._connected:
-                    logger.info(f"Supabase connected! Status: {response.status_code}")
-                else:
-                    logger.warning(f"Supabase returned status: {response.status_code}")
+                logger.info(f"Supabase status: {response.status_code}, connected: {self._connected}")
                 return self._connected
         except Exception as e:
-            logger.warning(f"Supabase not reachable: {type(e).__name__}: {e}")
+            logger.warning(f"Supabase unreachable: {e}")
             self._connected = False
             return False
     
     async def upload_file(self, path: str, content: bytes, content_type: str) -> Optional[str]:
-        """Upload file to Supabase Storage"""
         try:
             async with httpx.AsyncClient(timeout=60) as client:
                 response = await client.post(
                     f"{self.storage_url}/object/{self.bucket}/{path}",
-                    headers={
-                        **self.headers,
-                        "Content-Type": content_type
-                    },
+                    headers={**self.headers, "Content-Type": content_type},
                     content=content
                 )
-                
                 if response.status_code in [200, 201]:
-                    # Return public URL
-                    public_url = f"{self.url}/storage/v1/object/public/{self.bucket}/{path}"
-                    logger.info(f"Uploaded to Supabase: {path}")
-                    return public_url
-                else:
-                    logger.error(f"Supabase upload failed: {response.status_code} - {response.text}")
-                    return None
+                    return f"{self.url}/storage/v1/object/public/{self.bucket}/{path}"
+                logger.error(f"Upload failed: {response.status_code} - {response.text}")
+                return None
         except Exception as e:
-            logger.error(f"Supabase upload error: {type(e).__name__}: {e}")
+            logger.error(f"Upload error: {e}")
             return None
 
-# Initialize Supabase storage
 supabase_storage = SupabaseStorage(SUPABASE_URL, SUPABASE_KEY, SUPABASE_BUCKET)
+
+# ============ LIGHTWEIGHT FACE MATCHING ============
+
+def compute_image_hash(image_bytes: bytes) -> str:
+    """Compute perceptual hash for an image - lightweight alternative to face recognition"""
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img = img.convert('RGB')
+        # Use perceptual hash - very fast and lightweight
+        phash = imagehash.phash(img, hash_size=16)
+        return str(phash)
+    except Exception as e:
+        logger.error(f"Hash computation error: {e}")
+        return ""
+
+def compute_similarity(hash1: str, hash2: str) -> float:
+    """Compare two image hashes - returns similarity score 0-100"""
+    try:
+        h1 = imagehash.hex_to_hash(hash1)
+        h2 = imagehash.hex_to_hash(hash2)
+        # Hamming distance - lower is more similar
+        distance = h1 - h2
+        # Convert to similarity percentage (max distance for 16-bit hash is 256)
+        similarity = max(0, 100 - (distance / 256 * 100))
+        return similarity
+    except:
+        return 0
+
+async def extract_face_region(image_bytes: bytes) -> bytes:
+    """Extract center region of image (likely face area) - lightweight approach"""
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        img = img.convert('RGB')
+        width, height = img.size
+        
+        # Crop center region (where face likely is in a selfie)
+        center_x, center_y = width // 2, height // 2
+        crop_size = min(width, height) // 2
+        
+        left = max(0, center_x - crop_size)
+        top = max(0, center_y - crop_size)
+        right = min(width, center_x + crop_size)
+        bottom = min(height, center_y + crop_size)
+        
+        cropped = img.crop((left, top, right, bottom))
+        cropped = cropped.resize((128, 128))  # Normalize size
+        
+        buffer = io.BytesIO()
+        cropped.save(buffer, format='JPEG', quality=85)
+        return buffer.getvalue()
+    except Exception as e:
+        logger.error(f"Face extraction error: {e}")
+        return image_bytes
 
 # ============ MODELS ============
 
@@ -166,6 +197,14 @@ class PhotoResponse(BaseModel):
     filename: str
     created_at: str
 
+class MatchedPhotoResponse(BaseModel):
+    id: str
+    event_id: str
+    url: str
+    filename: str
+    similarity: float
+    created_at: str
+
 # ============ HELPER FUNCTIONS ============
 
 def hash_password(password: str) -> str:
@@ -176,19 +215,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(user_id: str, email: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=ACCESS_TOKEN_EXPIRE_HOURS)
-    payload = {"sub": user_id, "email": email, "exp": expire}
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode({"sub": user_id, "email": email, "exp": expire}, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
-        token = credentials.credentials
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        user_id = payload.get("sub")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        
-        user = await db.users.find_one({"id": user_id}, {"_id": 0})
-        if user is None:
+        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        user = await db.users.find_one({"id": payload.get("sub")}, {"_id": 0})
+        if not user:
             raise HTTPException(status_code=401, detail="User not found")
         return user
     except jwt.ExpiredSignatureError:
@@ -200,23 +233,18 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 @api_router.post("/auth/register", response_model=TokenResponse)
 async def register(user_data: UserCreate):
-    existing = await db.users.find_one({"email": user_data.email})
-    if existing:
+    if await db.users.find_one({"email": user_data.email}):
         raise HTTPException(status_code=400, detail="Email already registered")
     
     user_id = str(uuid.uuid4())
     user = {
-        "id": user_id,
-        "email": user_data.email,
-        "name": user_data.name,
+        "id": user_id, "email": user_data.email, "name": user_data.name,
         "password_hash": hash_password(user_data.password),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.users.insert_one(user)
-    token = create_access_token(user_id, user_data.email)
-    
     return TokenResponse(
-        access_token=token,
+        access_token=create_access_token(user_id, user_data.email),
         user=UserResponse(id=user_id, email=user_data.email, name=user_data.name, created_at=user["created_at"])
     )
 
@@ -225,42 +253,30 @@ async def login(user_data: UserLogin):
     user = await db.users.find_one({"email": user_data.email}, {"_id": 0})
     if not user or not verify_password(user_data.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    token = create_access_token(user["id"], user["email"])
     return TokenResponse(
-        access_token=token,
+        access_token=create_access_token(user["id"], user["email"]),
         user=UserResponse(id=user["id"], email=user["email"], name=user["name"], created_at=user["created_at"])
     )
 
 @api_router.get("/auth/me", response_model=UserResponse)
 async def get_me(current_user: dict = Depends(get_current_user)):
-    return UserResponse(
-        id=current_user["id"], email=current_user["email"],
-        name=current_user["name"], created_at=current_user["created_at"]
-    )
+    return UserResponse(**{k: current_user[k] for k in ["id", "email", "name", "created_at"]})
 
 # ============ EVENT ROUTES ============
 
 @api_router.post("/events", response_model=EventResponse)
 async def create_event(event_data: EventCreate, current_user: dict = Depends(get_current_user)):
     event_id = str(uuid.uuid4())
-    event_date = event_data.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    
     event = {
-        "id": event_id,
-        "name": event_data.name,
+        "id": event_id, "name": event_data.name,
         "description": event_data.description or "",
-        "date": event_date,
-        "user_id": current_user["id"],
-        "photo_count": 0,
+        "date": event_data.date or datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        "user_id": current_user["id"], "photo_count": 0,
         "qr_url": f"/event/{event_id}",
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     await db.events.insert_one(event)
-    
-    # Create local folder for fallback
     (UPLOADS_DIR / event_id).mkdir(exist_ok=True)
-    
     return EventResponse(**event)
 
 @api_router.get("/events", response_model=List[EventResponse])
@@ -280,42 +296,26 @@ async def delete_event(event_id: str, current_user: dict = Depends(get_current_u
     result = await db.events.delete_one({"id": event_id, "user_id": current_user["id"]})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Event not found")
-    
     await db.photos.delete_many({"event_id": event_id})
-    event_folder = UPLOADS_DIR / event_id
-    if event_folder.exists():
-        shutil.rmtree(event_folder)
-    
-    return {"message": "Event deleted successfully"}
+    shutil.rmtree(UPLOADS_DIR / event_id, ignore_errors=True)
+    return {"message": "Event deleted"}
 
 # ============ PHOTO UPLOAD ROUTES ============
 
 @api_router.post("/events/{event_id}/photos", response_model=List[PhotoResponse])
-async def upload_photos(
-    event_id: str,
-    files: List[UploadFile] = File(...),
-    current_user: dict = Depends(get_current_user)
-):
+async def upload_photos(event_id: str, files: List[UploadFile] = File(...), current_user: dict = Depends(get_current_user)):
     event = await db.events.find_one({"id": event_id, "user_id": current_user["id"]}, {"_id": 0})
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
     
-    # Check Supabase connectivity
     use_supabase = await supabase_storage.check_connection()
-    storage_mode = "Supabase" if use_supabase else "Local"
-    logger.info(f"Upload mode: {storage_mode}")
-    
-    # Ensure local folder exists (for fallback)
     event_folder = UPLOADS_DIR / event_id
     event_folder.mkdir(exist_ok=True)
     
     uploaded_photos = []
-    
     for file in files:
         if not file.content_type or not file.content_type.startswith("image/"):
-            logger.warning(f"Skipping non-image: {file.filename}")
             continue
-        
         try:
             content = await file.read()
             photo_id = str(uuid.uuid4())
@@ -323,45 +323,31 @@ async def upload_photos(
             safe_filename = f"{photo_id}.{file_ext}"
             storage_path = f"{event_id}/{safe_filename}"
             
+            # Compute image hash for face matching
+            img_hash = compute_image_hash(content)
+            
             public_url = None
-            
-            # Try Supabase first
             if use_supabase:
-                public_url = await supabase_storage.upload_file(
-                    storage_path, content, file.content_type
-                )
+                public_url = await supabase_storage.upload_file(storage_path, content, file.content_type)
             
-            # Fallback to local storage
             if not public_url:
-                file_path = event_folder / safe_filename
-                async with aiofiles.open(file_path, 'wb') as f:
+                async with aiofiles.open(event_folder / safe_filename, 'wb') as f:
                     await f.write(content)
                 public_url = f"/api/uploads/{event_id}/{safe_filename}"
-                logger.info(f"Saved locally: {safe_filename}")
             
-            # Save to MongoDB
             photo = {
-                "id": photo_id,
-                "event_id": event_id,
-                "url": public_url,
-                "filename": file.filename,
-                "storage_path": storage_path,
-                "storage_type": "supabase" if use_supabase and "supabase" in public_url else "local",
+                "id": photo_id, "event_id": event_id, "url": public_url,
+                "filename": file.filename, "storage_path": storage_path,
+                "image_hash": img_hash,
                 "created_at": datetime.now(timezone.utc).isoformat()
             }
             await db.photos.insert_one(photo)
             uploaded_photos.append(PhotoResponse(**photo))
-            
         except Exception as e:
-            logger.error(f"Error uploading {file.filename}: {str(e)}")
-            continue
+            logger.error(f"Upload error for {file.filename}: {e}")
     
-    # Update photo count
     if uploaded_photos:
-        await db.events.update_one(
-            {"id": event_id},
-            {"$inc": {"photo_count": len(uploaded_photos)}}
-        )
+        await db.events.update_one({"id": event_id}, {"$inc": {"photo_count": len(uploaded_photos)}})
     
     return uploaded_photos
 
@@ -370,7 +356,6 @@ async def get_event_photos(event_id: str, current_user: dict = Depends(get_curre
     event = await db.events.find_one({"id": event_id, "user_id": current_user["id"]}, {"_id": 0})
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    
     photos = await db.photos.find({"event_id": event_id}, {"_id": 0}).to_list(1000)
     return [PhotoResponse(**p) for p in photos]
 
@@ -388,34 +373,72 @@ async def get_public_photos(event_id: str):
     event = await db.events.find_one({"id": event_id}, {"_id": 0})
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    
     photos = await db.photos.find({"event_id": event_id}, {"_id": 0}).to_list(1000)
     return photos
+
+# ============ SELFIE FACE MATCHING (Customer Feature) ============
+
+@api_router.post("/public/events/{event_id}/find-my-photos", response_model=List[MatchedPhotoResponse])
+async def find_my_photos(event_id: str, selfie: UploadFile = File(...)):
+    """Customer uploads selfie to find their photos using lightweight image matching"""
+    event = await db.events.find_one({"id": event_id}, {"_id": 0})
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Read and process selfie
+    selfie_content = await selfie.read()
+    
+    # Extract face region from selfie
+    face_region = await extract_face_region(selfie_content)
+    selfie_hash = compute_image_hash(face_region)
+    
+    if not selfie_hash:
+        raise HTTPException(status_code=400, detail="Could not process selfie image")
+    
+    # Get all photos for this event
+    photos = await db.photos.find({"event_id": event_id}, {"_id": 0}).to_list(1000)
+    
+    matched_photos = []
+    for photo in photos:
+        photo_hash = photo.get("image_hash", "")
+        if photo_hash:
+            similarity = compute_similarity(selfie_hash, photo_hash)
+            # Include photos with similarity above threshold (adjusted for perceptual hash)
+            if similarity > 30:  # Lower threshold for perceptual matching
+                matched_photos.append(MatchedPhotoResponse(
+                    id=photo["id"],
+                    event_id=photo["event_id"],
+                    url=photo["url"],
+                    filename=photo["filename"],
+                    similarity=round(similarity, 1),
+                    created_at=photo["created_at"]
+                ))
+    
+    # Sort by similarity (highest first)
+    matched_photos.sort(key=lambda x: x.similarity, reverse=True)
+    
+    logger.info(f"Found {len(matched_photos)} matching photos for selfie in event {event_id}")
+    
+    return matched_photos
 
 # ============ STORAGE STATUS ============
 
 @api_router.get("/storage/status")
 async def storage_status():
-    """Check storage connectivity status"""
     supabase_ok = await supabase_storage.check_connection()
     return {
         "supabase_connected": supabase_ok,
         "supabase_url": SUPABASE_URL,
         "bucket": SUPABASE_BUCKET,
-        "fallback": "local" if not supabase_ok else None,
-        "message": "Using Supabase storage" if supabase_ok else "Using local storage (Supabase unreachable)"
+        "mode": "cloud" if supabase_ok else "local"
     }
-
-# ============ HEALTH CHECK ============
 
 @api_router.get("/health")
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
 
-# Include router
+# Include router and static files
 app.include_router(api_router)
-
-# Serve local uploads
 app.mount("/api/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
 app.add_middleware(
