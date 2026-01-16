@@ -118,9 +118,10 @@ def compute_similarity(hash1: str, hash2: str) -> float:
         h2 = imagehash.hex_to_hash(hash2)
         # Hamming distance - lower is more similar
         distance = h1 - h2
-        # Convert to similarity percentage (max distance for 16-bit hash is 256)
-        similarity = max(0, 100 - (distance / 256 * 100))
-        return similarity
+        # Stricter calculation: max distance for 16-bit hash is 256
+        # Use exponential decay for stricter matching
+        similarity = max(0, 100 * (1 - (distance / 64)))  # Much stricter: 64 instead of 256
+        return similarity if similarity >= 80 else 0  # Hard cutoff at 80%
     except:
         return 0
 
@@ -399,12 +400,14 @@ async def find_my_photos(event_id: str, selfie: UploadFile = File(...)):
     photos = await db.photos.find({"event_id": event_id}, {"_id": 0}).to_list(1000)
     
     matched_photos = []
+    STRICT_THRESHOLD = 80  # Only show 80%+ matches
+    
     for photo in photos:
         photo_hash = photo.get("image_hash", "")
         if photo_hash:
             similarity = compute_similarity(selfie_hash, photo_hash)
-            # Include photos with similarity above threshold (adjusted for perceptual hash)
-            if similarity > 30:  # Lower threshold for perceptual matching
+            # STRICT: Only include photos with 80%+ similarity
+            if similarity >= STRICT_THRESHOLD:
                 matched_photos.append(MatchedPhotoResponse(
                     id=photo["id"],
                     event_id=photo["event_id"],
