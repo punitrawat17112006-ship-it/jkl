@@ -1,0 +1,123 @@
+{
+  "meta": {
+    "project_name": "PhotoEvent Pro",
+    "design_persona": "E1: The Anti-AI Designer",
+    "theme_name": "The Darkroom (Cinematic/Immersive)",
+    "version": "1.0"
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Manrope, sans-serif",
+      "body": "Inter, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "weights": {
+      "headings": "font-bold (700) or font-extrabold (800)",
+      "body": "font-normal (400) or font-medium (500)"
+    },
+    "tracking": {
+      "headings": "tracking-tight (-0.02em)",
+      "overline": "tracking-widest (0.2em)"
+    },
+    "installation": "Import fonts via Google Fonts in index.css: @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@400;600;700;800&family=JetBrains+Mono&display=swap');"
+  },
+  "colors": {
+    "palette_strategy": "Cinematic Dark Mode (Netflix/Spotify Style)",
+    "description": "Deep obsidian backgrounds, high-contrast white text, and subtle surface elevations. Color is used only for action and status.",
+    "tailwind_vars": {
+      "background": "0 0% 4%",
+      "foreground": "0 0% 98%",
+      "card": "0 0% 8%",
+      "card-foreground": "0 0% 98%",
+      "popover": "0 0% 8%",
+      "popover-foreground": "0 0% 98%",
+      "primary": "0 0% 98%",
+      "primary-foreground": "0 0% 4%",
+      "secondary": "0 0% 12%",
+      "secondary-foreground": "0 0% 98%",
+      "muted": "0 0% 12%",
+      "muted-foreground": "0 0% 60%",
+      "accent": "0 0% 12%",
+      "accent-foreground": "0 0% 98%",
+      "destructive": "0 84.2% 60.2%",
+      "destructive-foreground": "0 0% 98%",
+      "border": "0 0% 16%",
+      "input": "0 0% 16%",
+      "ring": "0 0% 80%"
+    },
+    "semantic_usage": {
+      "brand_accent": "#E50914 (Use sparingly for 'Live' or 'Record' states)",
+      "success": "#22C55E",
+      "warning": "#F59E0B",
+      "error": "#EF4444",
+      "info": "#3B82F6"
+    }
+  },
+  "layout": {
+    "spacing_system": "Generous. Use p-6 or p-8 for cards. p-12 for section gaps.",
+    "grid_system": {
+      "dashboard": "Mode B: High Density. grid-cols-1 md:grid-cols-3 lg:grid-cols-4. gap-4.",
+      "gallery": "Mode A: Tetris Grid. Mix of col-span-1 and col-span-2 for visual interest.",
+      "mobile": "Single column. Full width cards. Bottom sheet navigation."
+    },
+    "container_width": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "border_radius": {
+      "default": "rounded-lg (0.5rem)",
+      "card": "rounded-xl (0.75rem)",
+      "button": "rounded-full (9999px) for primary actions, rounded-md for tools"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-primary text-primary-foreground hover:bg-white/90 shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all duration-300",
+      "secondary": "bg-secondary text-secondary-foreground hover:bg-secondary/80",
+      "ghost": "hover:bg-white/10 text-white"
+    },
+    "cards": {
+      "style": "bg-card border border-white/5 shadow-xl",
+      "hover": "hover:border-white/10 hover:bg-white/[0.02] transition-colors duration-300"
+    },
+    "inputs": {
+      "style": "bg-input/50 border-white/10 focus:border-white/30 focus:ring-0 rounded-md h-11"
+    },
+    "navigation": {
+      "sidebar": "bg-background border-r border-white/5 w-64 hidden md:flex flex-col",
+      "mobile_nav": "fixed bottom-0 left-0 right-0 bg-background/80 backdrop-blur-xl border-t border-white/10 h-16 flex items-center justify-around z-50"
+    },
+    "visual_enhancers": {
+      "glassmorphism": "backdrop-blur-xl bg-black/40 border border-white/10",
+      "gradients": "Use subtle radial gradients (radial-gradient(circle at center, var(--tw-gradient-stops))) for hero backgrounds. NO linear gradients on buttons.",
+      "shadows": "shadow-2xl for modals. shadow-none for internal dashboard cards."
+    }
+  },
+  "assets": {
+    "images": {
+      "hero_background": "https://images.unsplash.com/photo-1766353846635-00a10ab84157?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "event_crowd": "https://images.unsplash.com/photo-1763854492829-d209e5142c7d?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "photographer_hero": "https://images.unsplash.com/photo-1763256377588-f29bdc912698?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "selfie_placeholder": "https://images.unsplash.com/photo-1762175458674-fe315a18fa76?crop=entropy&cs=srgb&fm=jpg&q=85",
+      "qr_code_mockup": "https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=Example"
+    },
+    "icons": "Use lucide-react. Stroke width: 1.5px for elegance."
+  },
+  "motion": {
+    "library": "framer-motion",
+    "transitions": {
+      "default": "transition={{ type: 'spring', stiffness: 300, damping: 30 }}",
+      "hover": "whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}"
+    },
+    "page_transition": "initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}"
+  },
+  "universal_guidelines": [
+    "DO NOT use gradients for text or buttons. Keep it flat and clean.",
+    "DO NOT use 'Inter' for headings. Use 'Manrope'.",
+    "Ensure all text has sufficient contrast (WCAG AA).",
+    "Use 'sonner' for toasts.",
+    "All interactive elements MUST have data-testid attributes.",
+    "Mobile-first design for the Customer facing pages.",
+    "Dense, data-rich design for the Admin Dashboard.",
+    "Use 'lucide-react' for icons.",
+    "Dark mode is the DEFAULT and ONLY mode."
+  ],
+  "instructions_to_main_agent": "1. Update tailwind.config.js with the colors provided. 2. Update index.css with the CSS variables. 3. Install 'framer-motion' and 'sonner'. 4. Create the layout components (Sidebar, MobileNav). 5. Build the pages following the 'Netflix/Spotify' aesthetic (dark, immersive, content-first)."
+}
