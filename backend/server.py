@@ -116,39 +116,54 @@ def compute_similarity(hash1: str, hash2: str) -> float:
     try:
         h1 = imagehash.hex_to_hash(hash1)
         h2 = imagehash.hex_to_hash(hash2)
-        # Hamming distance - lower is more similar
         distance = h1 - h2
-        # Stricter calculation: max distance for 16-bit hash is 256
-        # Use exponential decay for stricter matching
-        similarity = max(0, 100 * (1 - (distance / 64)))  # Much stricter: 64 instead of 256
-        return similarity if similarity >= 80 else 0  # Hard cutoff at 80%
+        # Balanced calculation for 65% threshold
+        similarity = max(0, 100 * (1 - (distance / 100)))
+        return similarity
     except:
         return 0
 
 async def extract_face_region(image_bytes: bytes) -> bytes:
-    """Extract center region of image (likely face area) - lightweight approach"""
+    """Extract and preprocess face region from image - proper RGB alignment"""
     try:
         img = Image.open(io.BytesIO(image_bytes))
+        # Convert to RGB (mandatory for consistency)
         img = img.convert('RGB')
+        
+        # Auto-rotate based on EXIF
+        try:
+            from PIL import ExifTags
+            for orientation in ExifTags.TAGS.keys():
+                if ExifTags.TAGS[orientation] == 'Orientation':
+                    break
+            exif = img._getexif()
+            if exif:
+                orientation_value = exif.get(orientation)
+                if orientation_value == 3:
+                    img = img.rotate(180, expand=True)
+                elif orientation_value == 6:
+                    img = img.rotate(270, expand=True)
+                elif orientation_value == 8:
+                    img = img.rotate(90, expand=True)
+        except:
+            pass
+        
         width, height = img.size
+        # Crop center region (face area in selfie)
+        min_dim = min(width, height)
+        left = (width - min_dim) // 2
+        top = (height - min_dim) // 2
+        img = img.crop((left, top, left + min_dim, top + min_dim))
         
-        # Crop center region (where face likely is in a selfie)
-        center_x, center_y = width // 2, height // 2
-        crop_size = min(width, height) // 2
-        
-        left = max(0, center_x - crop_size)
-        top = max(0, center_y - crop_size)
-        right = min(width, center_x + crop_size)
-        bottom = min(height, center_y + crop_size)
-        
-        cropped = img.crop((left, top, right, bottom))
-        cropped = cropped.resize((128, 128))  # Normalize size
+        # Resize to standard size for consistent hashing
+        img = img.resize((256, 256), Image.Resampling.LANCZOS)
         
         buffer = io.BytesIO()
-        cropped.save(buffer, format='JPEG', quality=85)
+        buffer = io.BytesIO()
+        img.save(buffer, format='JPEG', quality=95)
         return buffer.getvalue()
     except Exception as e:
-        logger.error(f"Face extraction error: {e}")
+        logger.error(f"Face preprocessing error: {e}")
         return image_bytes
 
 # ============ MODELS ============
@@ -400,14 +415,16 @@ async def find_my_photos(event_id: str, selfie: UploadFile = File(...)):
     photos = await db.photos.find({"event_id": event_id}, {"_id": 0}).to_list(1000)
     
     matched_photos = []
-    STRICT_THRESHOLD = 80  # Only show 80%+ matches
+    THRESHOLD = 65  # Balanced threshold at 0.65
+    all_scores = []  # Track all scores for logging
     
     for photo in photos:
         photo_hash = photo.get("image_hash", "")
         if photo_hash:
             similarity = compute_similarity(selfie_hash, photo_hash)
-            # STRICT: Only include photos with 80%+ similarity
-            if similarity >= STRICT_THRESHOLD:
+            all_scores.append({"filename": photo["filename"], "score": similarity})
+            
+            if similarity >= THRESHOLD:
                 matched_photos.append(MatchedPhotoResponse(
                     id=photo["id"],
                     event_id=photo["event_id"],
@@ -416,6 +433,14 @@ async def find_my_photos(event_id: str, selfie: UploadFile = File(...)):
                     similarity=round(similarity, 1),
                     created_at=photo["created_at"]
                 ))
+    
+    # Log highest scores for debugging
+    if all_scores:
+        all_scores.sort(key=lambda x: x["score"], reverse=True)
+        top_scores = all_scores[:5]
+        logger.info(f"TOP 5 SCORES for event {event_id}: {top_scores}")
+        if not matched_photos:
+            logger.warning(f"NO MATCHES >= {THRESHOLD}%. Highest was: {top_scores[0] if top_scores else 'none'}")
     
     # Sort by similarity (highest first)
     matched_photos.sort(key=lambda x: x.similarity, reverse=True)
